@@ -38,7 +38,8 @@ case "${1:-}" in
     fetch "$C/v1se.pth" "$SILENT/resources/anti_spoof_models/4_0_0_80x80_MiniFASNetV1SE.pth"
     (cd "$C" && shasum -a 256 -c ../tools/convert.sha256)
     uv venv -q --python 3.13 "$C/venv"
-    uv pip install -q --python "$C/venv/bin/python" torch onnx onnxruntime
+    uv pip install -q --python "$C/venv/bin/python" --extra-index-url https://download.pytorch.org/whl/cpu \
+      torch onnx onnxruntime
     "$C/venv/bin/python" tools/convert_v1se.py "$C" models/minifasnet_v1se.onnx
     rm -rf "$C"
     ;;
