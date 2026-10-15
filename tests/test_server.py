@@ -25,9 +25,9 @@ def reset():
     server.candidates.clear()
 
 
-def start(client, monkeypatch, actions):
+def start(client, monkeypatch, actions, test=False):
     monkeypatch.setattr(server, "pick_actions", lambda: actions)
-    r = client.post("/api/session")
+    r = client.post("/api/session" + ("?test=1" if test else ""))
     assert r.status_code == 200
     return r.json()["id"]
 
@@ -123,13 +123,14 @@ def test_rate_limit(client):
 def test_page_health_and_model(client):
     assert client.get("/health").json() == {"status": "ok", "save": False}
     assert client.get("/").status_code == 200
+    assert client.get("/test").text == client.get("/").text
     assert len(client.get("/models/face_landmarker.task").content) == 3758596
 
 
 def test_saved_session_replays_same_result(client, monkeypatch, tmp_path):
     monkeypatch.setattr(server, "SAVE_DIR", str(tmp_path))
     assert client.get("/health").json()["save"] is True
-    body = upload(client, start(client, monkeypatch, ["turn_right", "turn_left"]), save="print").json()
+    body = upload(client, start(client, monkeypatch, ["turn_right", "turn_left"], test=True), save="print").json()
     assert body["saved"] is True
     [(label, _, result)] = replay.run(tmp_path)
     assert label == "print" and result["decision"] == body["decision"] == "PASS"
@@ -138,8 +139,19 @@ def test_saved_session_replays_same_result(client, monkeypatch, tmp_path):
 
 def test_saves_only_with_consent(client, monkeypatch, tmp_path):
     monkeypatch.setattr(server, "SAVE_DIR", str(tmp_path))
-    assert upload(client, start(client, monkeypatch, ["turn_right", "turn_left"])).json()["saved"] is False
+    assert upload(client, start(client, monkeypatch, ["turn_right", "turn_left"], test=True)).json()["saved"] is False
     assert not any(tmp_path.iterdir())
+
+
+def test_normal_page_never_saves(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "SAVE_DIR", str(tmp_path))
+    assert upload(client, start(client, monkeypatch, ["turn_right", "turn_left"]), save="real").json()["saved"] is False
+    assert not any(tmp_path.iterdir())
+
+
+def test_test_page_needs_save_dir(client, monkeypatch):
+    sid = start(client, monkeypatch, ["turn_right", "turn_left"], test=True)
+    assert upload(client, sid, save="real").json()["saved"] is False
 
 
 def test_unknown_save_label(client, monkeypatch, tmp_path):

@@ -1,7 +1,8 @@
 """HTTP API: session with a random challenge, frame upload, decision, profile photo choice.
 
-No images are written to disk unless SAVE_DIR is set and the user agrees (testing). After a PASS, up to 3 photo candidates stay in memory
-for PHOTO_TTL so the user can pick one; the rest are dropped.
+No images are written to disk unless SAVE_DIR is set and the user agrees on the /test page.
+After a PASS, up to 3 photo candidates stay in memory for PHOTO_TTL so the user can pick
+one; the rest are dropped.
 """
 import asyncio
 import json
@@ -79,6 +80,7 @@ def drop_old(now):
 
 
 @app.get("/")
+@app.get("/test")
 def index():
     return FileResponse(STATIC / "index.html")
 
@@ -107,7 +109,8 @@ def new_session(request: Request):
     q.append(now)
     sid = secrets.token_urlsafe(16)
     actions = pick_actions()
-    sessions[sid] = {"actions": actions, "created": now}
+    test = bool(SAVE_DIR) and request.query_params.get("test") == "1"   # started from /test
+    sessions[sid] = {"actions": actions, "created": now, "test": test}
     return {"id": sid, "actions": actions, "expires_in": int(SESSION_TTL)}
 
 
@@ -132,7 +135,7 @@ async def submit(sid: str, request: Request):
         stamps = json.loads(form.get("times") or "")
     except ValueError:
         raise HTTPException(400, "times must be a JSON list of capture times in ms")
-    label = form.get("save")             # sent only when the user agreed to saving
+    label = form.get("save")             # sent by /test only when the user agreed to saving
     if label is not None and label not in LABELS:
         raise HTTPException(400, f"save must be one of {', '.join(LABELS)}")
     if not MIN_FRAMES <= len(files) <= MAX_FRAMES or len(stamps) != len(files):
@@ -155,7 +158,7 @@ async def submit(sid: str, request: Request):
     if picked:
         candidates[sid] = {"created": time.monotonic(), "images": picked}
     result["photos"] = [photos.preview(img) for img in picked]
-    result["saved"] = bool(SAVE_DIR and label)
+    result["saved"] = bool(session["test"] and label)
     if result["saved"]:
         save(Path(SAVE_DIR) / label, sid, session["actions"], raw, stamps, result)
     log.info("liveness %s… asked=%s %s %s passive=%s %d ms photos=%d %s", sid[:6], ",".join(session["actions"]),

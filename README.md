@@ -110,14 +110,16 @@ data: keep `data/` private (it is in `.gitignore`) and delete it when done.
 
 ```sh
 ./liveness.sh stop
-SAVE_DIR=data ./liveness.sh start     # test mode
+SAVE_DIR=data ./liveness.sh start     # or put SAVE_DIR=data in .env
 ./liveness.sh eval data
 ```
 
-In test mode the page asks what is in front of the camera (real face, printed
-photo, photo or video on a screen, other) and asks for consent. A session is
-saved to `data/<label>/` only when the box is ticked. The label does not change
-the decision. Without `SAVE_DIR` the page and server behave as normal.
+With `SAVE_DIR` set, the normal page (`/`) shows a link to the test page
+(`/test`). The test page asks what is in front of the camera (real face,
+printed photo, photo or video on a screen, other) and asks for consent. A
+session is saved to `data/<label>/` only when it was started from `/test` and
+the box is ticked; the normal page never saves. The label does not change the
+decision. Without `SAVE_DIR` there is no test page and nothing is saved.
 
 `eval` prints each session's decision and reasons, then per label:
 

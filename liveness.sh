@@ -2,7 +2,7 @@
 # Manage liveness v2: setup | convert | check | test | trace DIR | eval DIR | serve | start | stop | status | clean.
 set -eu
 cd "$(dirname "$0")"
-[ -f .env ] && . ./.env
+[ -f .env ] && { set -a; . ./.env; set +a; }
 PY=.venv/bin/python
 ZOO=https://github.com/opencv/opencv_zoo/raw/47534e27c9851bb1128ccc0102f1145e27f23f98/models
 SILENT=https://github.com/minivision-ai/Silent-Face-Anti-Spoofing/raw/b6d5f04ad78778917853b25c778acef6d5626d15

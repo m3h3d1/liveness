@@ -50,10 +50,22 @@
   .test { margin-top: 12px; padding: 10px 12px; border: 1px dashed var(--warn); border-radius: 8px; font-size: .9rem; }
   .test label { display: block; margin-top: 6px; }
   .test select { width: 100%; margin-top: 4px; padding: 6px; font: inherit; }
+  .test .state { margin: 8px 0 0; font-weight: 600; }
+  .banner { border: 2px solid var(--warn); border-radius: 8px; padding: 10px 12px; margin-bottom: 16px; font-size: .9rem; }
+  .banner b { color: var(--warn); }
+  .switch { display: block; margin-top: 12px; padding: 10px; text-align: center; border: 1px solid var(--line);
+            border-radius: 8px; color: var(--accent); font-weight: 600; text-decoration: none; }
+  .switch[hidden] { display: none; }
+  .badge { position: absolute; top: 10px; right: 10px; padding: 2px 8px; border-radius: 6px; font-size: .75rem;
+           font-weight: 700; color: #fff; background: #000a; }
+  .badge.on { background: var(--fail); }
 </style>
 </head>
 <body>
 <main>
+  <div class="banner" id="banner" hidden><b>Test mode.</b> This page collects test data to measure accuracy.
+    Your camera frames are saved only if you tick "I agree" below. If you don't, nothing is saved.
+    The normal check never saves anything.</div>
   <h1>Liveness Check</h1>
   <p class="sub">Keep your face in the oval and follow the prompts. Each step waits for you.
     <span id="saveNote">Frames are checked on the server and not saved.</span> If the check passes, you can pick one of
@@ -63,6 +75,7 @@
       <video id="video" autoplay playsinline muted></video>
       <div class="oval" id="oval"></div>
       <div class="top" id="step"></div>
+      <div class="badge" id="badge" hidden></div>
       <div class="prompt"><b id="prompt">Press Start and allow the camera</b><small id="hint"></small></div>
     </div>
     <div class="bar"><span id="progress"></span></div>
@@ -77,10 +90,13 @@
         </select></label>
       <label><input type="checkbox" id="consent"> I agree to save the camera frames from this check on the
         server, to test accuracy. They stay private and are deleted after testing.</label>
+      <p class="state" id="saveState"></p>
     </div>
     <button id="start">Start</button>
     <div id="result"></div>
   </div>
+  <a class="switch" id="toTest" href="/test" hidden>Help test accuracy (test mode) →</a>
+  <a class="switch" id="toNormal" href="/" hidden>← Back to the normal check (nothing saved)</a>
 </main>
 <script type="module">
 import { FilesetResolver, FaceLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.0/vision_bundle.mjs";
@@ -110,11 +126,26 @@ const REASONS = {
 const $ = id => document.getElementById(id);
 const video = $("video"), oval = $("oval"), stepEl = $("step"), promptEl = $("prompt"), hint = $("hint");
 const progress = $("progress"), startBtn = $("start"), result = $("result");
-const testBox = $("test"), labelSel = $("label"), consent = $("consent");
+const testBox = $("test"), labelSel = $("label"), consent = $("consent"), badge = $("badge");
+const labelText = () => labelSel.selectedOptions[0].text;
+let savedAs = "";
+
+function saveState() {
+  $("saveState").textContent = consent.checked ? `✓ This check will be saved as "${labelText()}".`
+                                               : "This check will not be saved.";
+  badge.textContent = consent.checked ? "TEST · saving" : "TEST · not saving";
+  badge.classList.toggle("on", consent.checked);
+}
+consent.addEventListener("change", saveState);
+labelSel.addEventListener("change", saveState);
+const TEST = location.pathname === "/test";
 fetch("/health").then(r => r.json()).then(h => {
-  if (!h.save) return;
-  testBox.hidden = false;
+  if (!h.save) { if (TEST) location.replace("/"); return; }
+  if (!TEST) { $("toTest").hidden = false; return; }
+  testBox.hidden = $("banner").hidden = badge.hidden = $("toNormal").hidden = false;
+  document.title += " (test mode)";
   $("saveNote").textContent = "Test mode: frames are saved only if you agree below.";
+  saveState();
 }).catch(() => {});
 let stream = null, landmarker = null, lastTs = -1;
 
@@ -234,7 +265,8 @@ function show(d, local, sid) {
       Face in ${x.face_frames ?? "–"}/${x.frames ?? "–"} frames · face size ${x.face_size ?? "–"} (needs 0.2) ·
       brightness ${x.brightness ?? "–"} · sharpness ${x.sharpness ?? "–"}<br>
       Passive score ${s.passive ?? "–"} (pass ≥ 0.7) on ${x.passive_frames ?? 0} frames · ${d.ms} ms on server
-    </details>` + (d.saved ? `<p class="muted">Saved for testing as "${labelSel.selectedOptions[0].text}".</p>` : "");
+    </details>` +
+    (testBox.hidden ? "" : `<p class="muted">${d.saved ? `Saved for testing as "${savedAs}".` : "Not saved."}</p>`);
   if (d.photos && d.photos.length) choosePhoto(sid, d.photos);
 }
 
@@ -267,11 +299,11 @@ function choosePhoto(sid, previews) {
 }
 
 startBtn.addEventListener("click", async () => {
-  startBtn.disabled = true;
+  startBtn.disabled = labelSel.disabled = consent.disabled = true;
   result.textContent = "";
   try {
     await setup();
-    let r = await fetch("/api/session", { method: "POST" });
+    let r = await fetch(TEST ? "/api/session?test=1" : "/api/session", { method: "POST" });
     let d = await r.json();
     if (!r.ok) throw new Error(d.detail || r.statusText);
     const stop = recorder();
@@ -288,6 +320,7 @@ startBtn.addEventListener("click", async () => {
     const body = new FormData();
     shots.forEach((s, i) => body.append("frames", s.blob, `${i}.jpg`));
     body.append("times", JSON.stringify(shots.map(s => Math.round(s.t))));
+    savedAs = labelText();
     if (!testBox.hidden && consent.checked) body.append("save", labelSel.value);
     const sid = d.id;
     r = await fetch(`/api/session/${sid}/frames`, { method: "POST", body });
@@ -300,7 +333,7 @@ startBtn.addEventListener("click", async () => {
     promptEl.textContent = "Something went wrong";
     result.textContent = e.message;
   } finally {
-    startBtn.disabled = false;
+    startBtn.disabled = labelSel.disabled = consent.disabled = false;
     startBtn.textContent = "Try again";
   }
 });
