@@ -19,7 +19,8 @@ def client():
 
 
 @pytest.fixture(autouse=True)
-def reset():
+def reset(monkeypatch):
+    monkeypatch.setattr(server, "SAVE_DIR", None)   # ignore SAVE_DIR from .env
     server.sessions.clear()
     server.recent.clear()
     server.candidates.clear()

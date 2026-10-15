@@ -89,12 +89,11 @@ Downloaded by `setup` (pinned URLs, SHA-256 checked). Not stored in this repo.
 Other commands: `serve` (foreground), `trace DIR` (per-frame values for a
 folder of JPEGs), `eval DIR` (see below), `convert`, `clean`.
 
-To listen on another address, set `HOST` and `PORT` in the environment or in a
+Settings (`HOST`, `PORT`, `SAVE_DIR`) come from the environment or from a
 `.env` file next to `liveness.sh`:
 
 ```sh
-HOST=0.0.0.0
-PORT=8090
+cp .env.example .env
 ```
 
 Logs go to `~/Library/Logs/liveness-v2.log`. Only measurements are logged; no
@@ -168,16 +167,6 @@ Reason codes: `CHALLENGE_MISSING`, `CHALLENGE_ORDER`, `TOO_SLOW`, `NO_FACE`,
 Limits: 300 KB per frame, 20 MB per request, 10 sessions per client IP per
 minute. Sessions are single use and kept in memory. Photos are kept for 5
 minutes after a pass, then dropped.
-
-## What it does not stop
-
-- 3D masks.
-- Deepfakes or virtual cameras that inject frames into the browser.
-- A smooth face swap during the session.
-
-MiniFASNet alone misses many attacks, so the challenge is the main check and
-the passive score is a second signal. Thresholds are not tuned on a labeled
-dataset yet.
 
 ## Test clips
 

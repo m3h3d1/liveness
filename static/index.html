@@ -2,101 +2,162 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Liveness Check</title>
 <style>
-  :root { --bg: #f6f7f9; --card: #fff; --text: #1d2129; --muted: #667085; --line: #e3e6ea;
-          --accent: #2f6fed; --pass: #1a7f4b; --fail: #c4372d; --warn: #a15c00; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #111317; --card: #1a1d23; --text: #e8eaed; --muted: #9aa0a6; --line: #2b2f36;
-            --accent: #6b9bff; --pass: #4cc38a; --fail: #ff6b5f; --warn: #f0a83a; }
+  :root { color-scheme: dark; --bg: #0b0d10; --card: #14171c; --text: #e8eaed; --muted: #9aa0a6; --line: #262a31;
+          --accent: #5b8cff; --pass: #3ecf8e; --fail: #ff6b5f; --warn: #f5a524; }
+  @media (prefers-color-scheme: light) {
+    :root { color-scheme: light; --bg: #f5f6f8; --card: #fff; --text: #15181d; --muted: #5f6672; --line: #e3e6ea;
+            --accent: #2f6fed; --pass: #13995b; --fail: #d4382c; --warn: #b26a00; }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 16px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; }
-  main { max-width: 520px; margin: 0 auto; padding: 24px 16px 48px; }
-  h1 { font-size: 1.5rem; margin: 0 0 4px; }
-  .sub { color: var(--muted); margin: 0 0 16px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
-  .view { position: relative; aspect-ratio: 3 / 4; background: #0004; border-radius: 10px; overflow: hidden; }
+  body.testing { border-top: 4px solid var(--warn); }
+  main { max-width: 480px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 1.4rem; margin: 0 0 2px; letter-spacing: -.01em; }
+  .sub { color: var(--muted); font-size: .9rem; margin: 0 0 16px; }
+  .banner { border: 1px solid var(--warn); border-radius: 12px; padding: 10px 12px; margin-bottom: 16px; font-size: .88rem; }
+  .banner b { color: var(--warn); }
+
+  .stage { position: relative; width: min(100%, calc(72dvh * 3 / 4)); aspect-ratio: 3 / 4; margin: 0 auto;
+           border-radius: 24px; overflow: hidden; background: #000; color: #fff; }
+  @media (max-width: 560px) { .stage { width: calc(100% + 32px); margin: 0 -16px; border-radius: 0; } }
   video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
-  .oval { position: absolute; inset: 12% 18%; border: 3px dashed #fff8; border-radius: 50%; pointer-events: none;
-          transition: border-color .2s; }
-  .oval.ok { border-color: #4cc38a; border-style: solid; }
-  .top { position: absolute; top: 0; left: 0; right: 0; padding: 10px 14px; color: #fff; font-size: .9rem;
-         background: linear-gradient(#000a, transparent); }
-  .prompt { position: absolute; left: 0; right: 0; bottom: 0; padding: 16px 14px; text-align: center; color: #fff;
-            background: linear-gradient(transparent, #000c); }
-  .prompt b { display: block; font-size: 1.35rem; }
-  .prompt small { display: block; min-height: 1.4em; opacity: .9; }
-  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 12px; }
-  .bar span { display: block; height: 100%; width: 0; background: var(--accent); }
-  button { width: 100%; margin-top: 12px; padding: 12px; border-radius: 8px; border: 0; font: inherit;
-           font-weight: 600; background: var(--accent); color: #fff; cursor: pointer; }
+  .oval { position: absolute; inset: 7% 17% 27%; border-radius: 50%; box-shadow: 0 0 0 100vmax #000a; }
+  .ring { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .ring path { fill: none; stroke-width: 1.3; }
+  .ring .track { stroke: #fff4; }
+  .ring .fill { stroke: #fff; stroke-dasharray: 0 100; transition: stroke-dasharray .4s, stroke .2s; }
+  .stage[data-state=face] .fill { stroke: var(--pass); }
+  .stage[data-state=adjust] .fill { stroke: var(--warn); }
+  .stage[data-state=PASS] .fill { stroke: var(--pass); }
+  .stage[data-state=FAIL] .fill { stroke: var(--fail); }
+  .stage[data-state=UNCERTAIN] .fill { stroke: var(--warn); }
+  .mark { position: absolute; inset: 0; display: grid; place-items: center; }
+  .mark svg { width: 42%; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round;
+              stroke-linejoin: round; filter: drop-shadow(0 2px 8px #0008); }
+  .mark svg * { stroke-dasharray: 100; stroke-dashoffset: 100; animation: draw .7s ease-out forwards; }
+  .mark svg :nth-child(2) { animation-delay: .35s; }
+  .stage[data-state=PASS] .mark { color: var(--pass); }
+  .stage[data-state=FAIL] .mark { color: var(--fail); }
+  .stage[data-state=UNCERTAIN] .mark { color: var(--warn); }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+
+  .glass { background: #0006; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+  .badge { position: absolute; top: 12px; right: 12px; padding: 3px 10px; border-radius: 99px; font-size: .72rem;
+           font-weight: 700; letter-spacing: .04em; }
+  .badge.on { background: var(--fail); }
+  .hud { position: absolute; left: 0; right: 0; bottom: 0; padding: 0 14px 16px; text-align: center; }
+  .dots { display: flex; justify-content: center; gap: 6px; margin-bottom: 10px; font-size: .75rem; }
+  .dots span { padding: 2px 10px; border-radius: 99px; background: #fff2; color: #fffa; }
+  .dots .now { background: #fff; color: #000; font-weight: 700; }
+  .dots .done { background: var(--pass); color: #000; }
+  .dots .miss { background: var(--fail); color: #000; }
+  .prompt { display: inline-flex; align-items: center; gap: 10px; padding: 8px 16px; border-radius: 14px;
+            font-size: 1.1rem; font-weight: 700; }
+  .icon:empty { display: none; }
+  .icon svg { display: block; width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2;
+              stroke-linecap: round; stroke-linejoin: round; }
+  .icon.turn_left svg { animation: nudge-l 1s ease-in-out infinite; }
+  .icon.turn_right svg { animation: nudge-r 1s ease-in-out infinite; }
+  .icon.blink svg { animation: blink 1.6s infinite; }
+  @keyframes nudge-l { 50% { transform: translateX(-5px); } }
+  @keyframes nudge-r { 50% { transform: translateX(5px); } }
+  @keyframes blink { 0%, 80%, 100% { transform: scaleY(1); } 90% { transform: scaleY(.1); } }
+  .hint { display: block; min-height: 1.4em; margin-top: 6px; font-size: .9rem; color: var(--warn); font-weight: 600; }
+
+  .test { margin: 16px 0 0; padding: 14px; border: 1px dashed var(--warn); border-radius: 16px; font-size: .9rem; }
+  .test legend { padding: 0 6px; font-weight: 700; color: var(--warn); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .chips input, .toggle input { position: absolute; opacity: 0; pointer-events: none; }
+  .chips span { display: block; padding: 6px 12px; border: 1px solid var(--line); border-radius: 99px; cursor: pointer; }
+  .chips input:checked + span { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .chips input:focus-visible + span, .toggle input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .toggle { display: flex; gap: 12px; align-items: flex-start; margin-top: 14px; cursor: pointer; }
+  .toggle .track { flex: none; position: relative; width: 42px; height: 24px; border-radius: 99px; background: var(--line);
+                   transition: background .2s; }
+  .toggle .track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+                          border-radius: 50%; background: #fff; transition: transform .2s; }
+  .toggle input:checked + .track { background: var(--fail); }
+  .toggle input:checked + .track::after { transform: translateX(18px); }
+  .test .state { margin: 10px 0 0; font-weight: 700; }
+  fieldset:disabled { opacity: .6; }
+
+  button { width: 100%; margin-top: 16px; padding: 14px; border-radius: 14px; border: 0; font: inherit;
+           font-weight: 700; background: var(--accent); color: #fff; cursor: pointer; }
   button:disabled { opacity: .5; cursor: default; }
-  #result { margin-top: 16px; }
-  .decision { font-size: 1.4rem; font-weight: 700; }
+  .switch { display: block; margin-top: 12px; padding: 12px; text-align: center; border: 1px solid var(--line);
+            border-radius: 14px; color: var(--accent); font-weight: 600; text-decoration: none; }
+
+  .card { margin-top: 16px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
+  .decision { font-size: 1.3rem; font-weight: 800; }
   .PASS { color: var(--pass); } .FAIL { color: var(--fail); } .UNCERTAIN { color: var(--warn); }
   ul { margin: 6px 0 0; padding-left: 20px; }
   .muted { color: var(--muted); font-size: .85rem; }
-  details { margin-top: 8px; font-size: .85rem; color: var(--muted); }
-  .photos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
-  .photos img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; cursor: pointer;
-                border: 3px solid transparent; }
-  .photos img.picked { border-color: var(--accent); }
+  details { margin-top: 10px; font-size: .85rem; color: var(--muted); }
+  summary { cursor: pointer; }
+  .photos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 10px; }
+  .photos img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 50%; cursor: pointer;
+                border: 3px solid transparent; transition: transform .15s; }
+  .photos img.picked { border-color: var(--accent); transform: scale(1.04); }
   .chosen { margin-top: 10px; text-align: center; }
-  .chosen img { width: 60%; border-radius: 50%; }
-  .chosen a { display: block; margin-top: 8px; color: var(--accent); font-weight: 600; }
-  .test { margin-top: 12px; padding: 10px 12px; border: 1px dashed var(--warn); border-radius: 8px; font-size: .9rem; }
-  .test label { display: block; margin-top: 6px; }
-  .test select { width: 100%; margin-top: 4px; padding: 6px; font: inherit; }
-  .test .state { margin: 8px 0 0; font-weight: 600; }
-  .banner { border: 2px solid var(--warn); border-radius: 8px; padding: 10px 12px; margin-bottom: 16px; font-size: .9rem; }
-  .banner b { color: var(--warn); }
-  .switch { display: block; margin-top: 12px; padding: 10px; text-align: center; border: 1px solid var(--line);
-            border-radius: 8px; color: var(--accent); font-weight: 600; text-decoration: none; }
-  .switch[hidden] { display: none; }
-  .badge { position: absolute; top: 10px; right: 10px; padding: 2px 8px; border-radius: 6px; font-size: .75rem;
-           font-weight: 700; color: #fff; background: #000a; }
-  .badge.on { background: var(--fail); }
+  .chosen img { width: 55%; border-radius: 50%; }
+  .chosen a { display: block; margin-top: 8px; color: var(--accent); font-weight: 700; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .mark svg * { stroke-dashoffset: 0; }
+  }
 </style>
 </head>
 <body>
 <main>
   <div class="banner" id="banner" hidden><b>Test mode.</b> This page collects test data to measure accuracy.
-    Your camera frames are saved only if you tick "I agree" below. If you don't, nothing is saved.
+    Your camera frames are saved only if you turn on "I agree" below. If you don't, nothing is saved.
     The normal check never saves anything.</div>
   <h1>Liveness Check</h1>
-  <p class="sub">Keep your face in the oval and follow the prompts. Each step waits for you.
-    <span id="saveNote">Frames are checked on the server and not saved.</span> If the check passes, you can pick one of
-    3 photos from it as a profile picture to download; the others are discarded.</p>
-  <div class="card">
-    <div class="view">
-      <video id="video" autoplay playsinline muted></video>
-      <div class="oval" id="oval"></div>
-      <div class="top" id="step"></div>
-      <div class="badge" id="badge" hidden></div>
-      <div class="prompt"><b id="prompt">Press Start and allow the camera</b><small id="hint"></small></div>
+  <p class="sub">Keep your face in the oval and follow the prompts.
+    <span id="saveNote">Frames are checked on the server and not saved.</span>
+    If the check passes, you can pick a profile photo from it.</p>
+
+  <div class="stage" id="stage" data-state="idle">
+    <video id="video" autoplay playsinline muted></video>
+    <div class="oval">
+      <svg class="ring" viewBox="0 0 75 100" preserveAspectRatio="none" aria-hidden="true">
+        <path class="track" d="M37.5 1A36.5 49 0 1 1 37.5 99A36.5 49 0 1 1 37.5 1" pathLength="100"/>
+        <path class="fill" id="ring" d="M37.5 1A36.5 49 0 1 1 37.5 99A36.5 49 0 1 1 37.5 1" pathLength="100"/>
+      </svg>
+      <div class="mark" id="mark"></div>
     </div>
-    <div class="bar"><span id="progress"></span></div>
-    <div class="test" id="test" hidden>
-      <b>Test mode</b>
-      <label>What are you showing the camera?
-        <select id="label">
-          <option value="real">My real face</option>
-          <option value="print">A printed photo</option>
-          <option value="replay">A photo or video on a screen</option>
-          <option value="other">Something else</option>
-        </select></label>
-      <label><input type="checkbox" id="consent"> I agree to save the camera frames from this check on the
-        server, to test accuracy. They stay private and are deleted after testing.</label>
-      <p class="state" id="saveState"></p>
+    <div class="badge glass" id="badge" hidden></div>
+    <div class="hud">
+      <div class="dots" id="dots"></div>
+      <div class="prompt glass"><span class="icon" id="icon"></span><span id="prompt" aria-live="polite">Press Start and allow the camera</span></div>
+      <span class="hint" id="hint"></span>
     </div>
-    <button id="start">Start</button>
-    <div id="result"></div>
   </div>
+
+  <fieldset class="test" id="test" hidden>
+    <legend>Test mode</legend>
+    What are you showing the camera?
+    <div class="chips">
+      <label><input type="radio" name="label" value="real" checked><span>Real face</span></label>
+      <label><input type="radio" name="label" value="print"><span>Printed photo</span></label>
+      <label><input type="radio" name="label" value="replay"><span>Photo/video on a screen</span></label>
+      <label><input type="radio" name="label" value="other"><span>Other</span></label>
+    </div>
+    <label class="toggle"><input type="checkbox" id="consent" role="switch"><span class="track"></span>
+      <span>I agree to save the camera frames from this check on the server, to test accuracy. They stay
+        private and are deleted after testing.</span></label>
+    <p class="state" id="saveState"></p>
+  </fieldset>
+
+  <button id="start">Start</button>
   <a class="switch" id="toTest" href="/test" hidden>Help test accuracy (test mode) →</a>
   <a class="switch" id="toNormal" href="/" hidden>← Back to the normal check (nothing saved)</a>
+  <section class="card" id="result" hidden></section>
 </main>
 <script type="module">
 import { FilesetResolver, FaceLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.0/vision_bundle.mjs";
@@ -106,9 +167,21 @@ const FPS = 15, LOOK_MS = 1500, STEP_MS = 6000, DONE_MS = 600, MAX_SIDE = 640;
 // Slightly stricter than the server, so a step shown as done also passes there.
 const TURN = 0.35, BACK = 0.25, BACK_MS = 2000, BLINK_RISE = 0.22, BLINK_OPEN = 0.1;
 const STEPS = {
-  turn_left: { text: "← Turn your head to your left", sign: 1 },
-  turn_right: { text: "Turn your head to your right →", sign: -1 },
+  turn_left: { text: "Turn head left", sign: 1 },
+  turn_right: { text: "Turn head right", sign: -1 },
   blink: { text: "Blink" },
+};
+const NAMES = { look: "Look", turn_left: "Left", turn_right: "Right", blink: "Blink" };
+const ICONS = {
+  look: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01M9 15c1.7 1.2 4.3 1.2 6 0"/></svg>',
+  turn_left: '<svg viewBox="0 0 24 24"><path d="M19 12H5m6-6-6 6 6 6"/></svg>',
+  turn_right: '<svg viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>',
+  blink: '<svg viewBox="0 0 24 24"><path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+};
+const MARKS = {
+  PASS: '<path d="M15 26l7 7 13-15" pathLength="100"/>',
+  FAIL: '<path d="M18 18l14 14M32 18 18 32" pathLength="100"/>',
+  UNCERTAIN: '<path d="M25 14v13M25 35v.5" pathLength="100"/>',
 };
 const REASONS = {
   CHALLENGE_MISSING: "A requested action was not seen.",
@@ -124,30 +197,38 @@ const REASONS = {
   EXPIRED: "The session expired. Please try again.",
 };
 const $ = id => document.getElementById(id);
-const video = $("video"), oval = $("oval"), stepEl = $("step"), promptEl = $("prompt"), hint = $("hint");
-const progress = $("progress"), startBtn = $("start"), result = $("result");
-const testBox = $("test"), labelSel = $("label"), consent = $("consent"), badge = $("badge");
-const labelText = () => labelSel.selectedOptions[0].text;
-let savedAs = "";
+const video = $("video"), stage = $("stage"), ring = $("ring"), mark = $("mark"), promptEl = $("prompt");
+const icon = $("icon"), hint = $("hint"), startBtn = $("start"), result = $("result");
+const testBox = $("test"), consent = $("consent"), badge = $("badge");
+const TEST = location.pathname === "/test";
+const picked = () => document.querySelector('input[name="label"]:checked');
+let stream = null, landmarker = null, lastTs = -1, savedAs = "";
+
+const setState = s => { stage.dataset.state = s; };
+const setRing = p => { ring.style.strokeDasharray = `${p * 100} 100`; };
+function say(text, kind = "") {
+  promptEl.textContent = text;
+  icon.className = `icon ${kind}`;
+  icon.innerHTML = ICONS[kind] || "";
+}
 
 function saveState() {
-  $("saveState").textContent = consent.checked ? `✓ This check will be saved as "${labelText()}".`
+  const label = picked().nextElementSibling.textContent;
+  $("saveState").textContent = consent.checked ? `✓ This check will be saved as "${label}".`
                                                : "This check will not be saved.";
-  badge.textContent = consent.checked ? "TEST · saving" : "TEST · not saving";
+  badge.textContent = consent.checked ? "TEST · SAVING" : "TEST · NOT SAVING";
   badge.classList.toggle("on", consent.checked);
 }
-consent.addEventListener("change", saveState);
-labelSel.addEventListener("change", saveState);
-const TEST = location.pathname === "/test";
+testBox.addEventListener("change", saveState);
 fetch("/health").then(r => r.json()).then(h => {
   if (!h.save) { if (TEST) location.replace("/"); return; }
   if (!TEST) { $("toTest").hidden = false; return; }
   testBox.hidden = $("banner").hidden = badge.hidden = $("toNormal").hidden = false;
+  document.body.classList.add("testing");
   document.title += " (test mode)";
   $("saveNote").textContent = "Test mode: frames are saved only if you agree below.";
   saveState();
 }).catch(() => {});
-let stream = null, landmarker = null, lastTs = -1;
 
 async function setup() {
   if (!stream) {
@@ -157,7 +238,7 @@ async function setup() {
     await new Promise(r => (video.readyState >= 2 ? r() : (video.onloadeddata = r)));
   }
   if (!landmarker) {
-    promptEl.textContent = "Loading face guide…";
+    say("Loading face guide…");
     const files = await FilesetResolver.forVisionTasks(WASM);
     const opts = delegate => ({
       baseOptions: { modelAssetPath: "/models/face_landmarker.task", delegate },
@@ -173,7 +254,7 @@ function measure() {
   lastTs = ts;
   const r = landmarker.detectForVideo(video, ts);
   const ok = r.faceLandmarks.length > 0;
-  oval.classList.toggle("ok", ok);
+  setState(ok ? "face" : "idle");
   if (!ok) return null;
   const p = r.faceLandmarks[0];
   // Nose tip vs. middle of the face sides, in face widths. Positive = person turned to their left.
@@ -202,9 +283,7 @@ function watch(ms, onSample) {
   return new Promise(resolve => {
     const t0 = performance.now();
     const tick = () => {
-      const used = performance.now() - t0;
-      progress.style.width = Math.min(100, used / ms * 100) + "%";
-      if (used >= ms) return resolve(false);
+      if (performance.now() - t0 >= ms) return resolve(false);
       const m = measure();
       if (m && onSample(m)) return resolve(true);
       requestAnimationFrame(tick);
@@ -216,9 +295,24 @@ function watch(ms, onSample) {
 const median = xs => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 const pause = ms => watch(ms, () => false);
 
+// Step chips and ring; returns a function to mark step i done or missed.
+function progress(steps) {
+  const states = steps.map((_, i) => (i ? "todo" : "now"));
+  const draw = () => {
+    $("dots").innerHTML = steps.map((s, i) =>
+      `<span class="${states[i]}">${{ done: "✓ ", miss: "✕ " }[states[i]] || ""}${NAMES[s]}</span>`).join("");
+    setRing(states.filter(s => s === "done" || s === "miss").length / steps.length);
+  };
+  draw();
+  return (i, ok) => {
+    states[i] = ok ? "done" : "miss";
+    if (i + 1 < steps.length) states[i + 1] = "now";
+    draw();
+  };
+}
+
 async function baseline() {
-  stepEl.textContent = "Get ready";
-  promptEl.textContent = "Look straight at the camera";
+  say("Look straight ahead", "look");
   hint.textContent = "";
   const samples = [];
   await watch(LOOK_MS, m => { samples.push(m); return false; });
@@ -228,7 +322,7 @@ async function baseline() {
 
 async function runStep(action, base) {
   const s = STEPS[action];
-  promptEl.textContent = s.text;
+  say(s.text, action);
   hint.textContent = "";
   let closed = false;
   const done = await watch(STEP_MS, m => {
@@ -239,14 +333,15 @@ async function runStep(action, base) {
     }
     const d = (m.offset - base.offset) * s.sign;
     hint.textContent = d <= -TURN ? "Other way" : d >= TURN / 2 ? "A little more" : "";
+    if (hint.textContent) setState("adjust");
     return d >= TURN;
   });
   hint.textContent = "";
   if (done && action !== "blink") {
-    promptEl.textContent = "✓ Good. Now look back at the camera";
+    say("✓ Good, now look back", "look");
     await watch(BACK_MS, m => Math.abs(m.offset - base.offset) <= BACK);
   } else {
-    promptEl.textContent = done ? "✓ Done" : "Time's up for this step";
+    say(done ? "✓ Done" : "Time's up");
     await pause(DONE_MS);
   }
   return done;
@@ -256,6 +351,11 @@ function show(d, local, sid) {
   const reasons = (d.reasons || []).map(r => `<li>${REASONS[r] || r}</li>`).join("");
   const label = { PASS: "Live person confirmed", FAIL: "Check failed", UNCERTAIN: "Needs review" }[d.decision];
   const x = d.details || {}, s = d.scores || {};
+  setState(d.decision);
+  setRing(1);
+  mark.innerHTML = `<svg viewBox="0 0 50 50"><circle cx="25" cy="25" r="22" pathLength="100"/>${MARKS[d.decision]}</svg>`;
+  say(label);
+  result.hidden = false;
   result.innerHTML = `<div class="decision ${d.decision}">${label}</div>` +
     (reasons ? `<ul>${reasons}</ul>` : "") +
     `<details><summary>What was measured</summary>
@@ -268,6 +368,7 @@ function show(d, local, sid) {
     </details>` +
     (testBox.hidden ? "" : `<p class="muted">${d.saved ? `Saved for testing as "${savedAs}".` : "Not saved."}</p>`);
   if (d.photos && d.photos.length) choosePhoto(sid, d.photos);
+  result.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function choosePhoto(sid, previews) {
@@ -299,41 +400,45 @@ function choosePhoto(sid, previews) {
 }
 
 startBtn.addEventListener("click", async () => {
-  startBtn.disabled = labelSel.disabled = consent.disabled = true;
-  result.textContent = "";
+  startBtn.disabled = testBox.disabled = true;
+  result.hidden = true;
+  mark.innerHTML = $("dots").innerHTML = "";
+  setState("idle");
+  setRing(0);
   try {
     await setup();
     let r = await fetch(TEST ? "/api/session?test=1" : "/api/session", { method: "POST" });
     let d = await r.json();
     if (!r.ok) throw new Error(d.detail || r.statusText);
+    const step = progress(["look", ...d.actions]);
     const stop = recorder();
     const base = await baseline();
+    step(0, true);
     const local = [];
     for (const [i, a] of d.actions.entries()) {
-      stepEl.textContent = `Step ${i + 1} of ${d.actions.length}`;
-      if (await runStep(a, base)) local.push(a);
+      const ok = await runStep(a, base);
+      if (ok) local.push(a);
+      step(i + 1, ok);
     }
     const shots = await stop();
-    stepEl.textContent = "";
-    promptEl.textContent = "Checking…";
-    progress.style.width = "100%";
+    say("Checking…");
     const body = new FormData();
     shots.forEach((s, i) => body.append("frames", s.blob, `${i}.jpg`));
     body.append("times", JSON.stringify(shots.map(s => Math.round(s.t))));
-    savedAs = labelText();
-    if (!testBox.hidden && consent.checked) body.append("save", labelSel.value);
+    savedAs = picked().nextElementSibling.textContent;
+    if (!testBox.hidden && consent.checked) body.append("save", picked().value);
     const sid = d.id;
     r = await fetch(`/api/session/${sid}/frames`, { method: "POST", body });
     d = await r.json();
     if (!r.ok) throw new Error(d.detail || r.statusText);
-    promptEl.textContent = "Finished";
     show(d, local, sid);
   } catch (e) {
-    stepEl.textContent = "";
-    promptEl.textContent = "Something went wrong";
+    setState("FAIL");
+    say("Something went wrong");
+    result.hidden = false;
     result.textContent = e.message;
   } finally {
-    startBtn.disabled = labelSel.disabled = consent.disabled = false;
+    startBtn.disabled = testBox.disabled = false;
     startBtn.textContent = "Try again";
   }
 });
