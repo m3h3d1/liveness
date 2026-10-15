@@ -68,7 +68,10 @@ case "${1:-}" in
     "$0" status
     ;;
   stop)
-    pkill -f "uvicorn app.server:app" && echo "stopped" || echo "not running"
+    pkill -f "uvicorn app.server:app" || { echo "not running"; exit 0; }
+    i=0
+    while pgrep -f "uvicorn app.server:app" >/dev/null && [ $i -lt 20 ]; do sleep 0.5; i=$((i + 1)); done
+    echo "stopped"
     ;;
   status)
     if pgrep -f "uvicorn app.server:app" >/dev/null; then
