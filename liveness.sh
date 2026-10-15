@@ -1,5 +1,5 @@
 #!/bin/sh
-# Manage liveness v2: setup | convert | check | test | trace DIR | serve | start | stop | status | clean.
+# Manage liveness v2: setup | convert | check | test | trace DIR | eval DIR | serve | start | stop | status | clean.
 set -eu
 cd "$(dirname "$0")"
 [ -f .env ] && . ./.env
@@ -52,6 +52,9 @@ case "${1:-}" in
   trace)
     "$PY" -m tools.trace "$2"
     ;;
+  eval)
+    "$PY" -m tools.eval "$2"
+    ;;
   serve)
     # Log to the terminal and to ~/Library/Logs/liveness-v2.log (measurements only, no images).
     .venv/bin/uvicorn app.server:app --host "${HOST:-127.0.0.1}" --port "${PORT:-8090}" \
@@ -79,7 +82,7 @@ case "${1:-}" in
     rm -rf .venv .convert models samples
     ;;
   *)
-    echo "usage: $0 setup | convert | check | test | trace DIR | serve | start | stop | status | clean" >&2
+    echo "usage: $0 setup | convert | check | test | trace DIR | eval DIR | serve | start | stop | status | clean" >&2
     exit 1
     ;;
 esac

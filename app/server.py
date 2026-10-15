@@ -1,11 +1,12 @@
 """HTTP API: session with a random challenge, frame upload, decision, profile photo choice.
 
-No images are written to disk. After a PASS, up to 3 photo candidates stay in memory
+No images are written to disk unless SAVE_DIR is set (for testing). After a PASS, up to 3 photo candidates stay in memory
 for PHOTO_TTL so the user can pick one; the rest are dropped.
 """
 import asyncio
 import json
 import logging
+import os
 import secrets
 import time
 from collections import defaultdict, deque
@@ -36,6 +37,7 @@ MIN_FACE = 0.2                   # face size, fraction of the frame
 BRIGHTNESS = (40, 220)
 MIN_SHARPNESS = 15.0
 STATIC = Path(__file__).resolve().parent.parent / "static"
+SAVE_DIR = os.environ.get("SAVE_DIR")    # save each session's frames for tools/eval.py
 
 log = logging.getLogger("uvicorn.error")
 sessions = {}
@@ -132,26 +134,25 @@ async def submit(sid: str, request: Request):
     if not MIN_FRAMES <= len(files) <= MAX_FRAMES or len(stamps) != len(files):
         raise HTTPException(400, f"send {MIN_FRAMES}-{MAX_FRAMES} frames with one capture time each")
 
-    images = []
+    images, raw = [], []
     for i, f in enumerate(files):
         data = await f.read(MAX_FRAME_BYTES + 1)
         if len(data) > MAX_FRAME_BYTES:
             raise HTTPException(413, f"frame {i} larger than 300 KB")
-        img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+        img = load_frame(data)
         if img is None:
             raise HTTPException(400, f"frame {i} is not an image")
-        h, w = img.shape[:2]
-        if max(h, w) > MAX_SIDE:
-            k = MAX_SIDE / max(h, w)
-            img = cv2.resize(img, (round(w * k), round(h * k)))
         images.append(img)
-    times = [(float(t) - float(stamps[0])) / 1000 for t in stamps]
+        raw.append(data)
+    times = to_seconds(stamps)
 
     async with lock:
         result, picked = await run_in_threadpool(analyze, session["actions"], images, times)
     if picked:
         candidates[sid] = {"created": time.monotonic(), "images": picked}
     result["photos"] = [photos.preview(img) for img in picked]
+    if SAVE_DIR:
+        save(sid, session["actions"], raw, stamps, result)
     log.info("liveness %s… asked=%s %s %s passive=%s %d ms photos=%d %s", sid[:6], ",".join(session["actions"]),
              result["decision"], ",".join(result["reasons"]) or "-", result["scores"]["passive"], result["ms"],
              len(picked), result["details"])
@@ -172,6 +173,29 @@ async def choose_photo(sid: str, request: Request):
     del candidates[sid]   # single use; the other photos are dropped
     return Response(photos.jpeg(entry["images"][choice]), media_type="image/jpeg",
                     headers={"Content-Disposition": 'attachment; filename="profile.jpg"'})
+
+
+def load_frame(data):
+    img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    if img is not None and max(img.shape[:2]) > MAX_SIDE:
+        h, w = img.shape[:2]
+        k = MAX_SIDE / max(h, w)
+        img = cv2.resize(img, (round(w * k), round(h * k)))
+    return img
+
+
+def to_seconds(stamps):
+    return [(float(t) - float(stamps[0])) / 1000 for t in stamps]
+
+
+def save(sid, actions, raw, stamps, result):
+    out = Path(SAVE_DIR) / f"{time.strftime('%Y%m%d-%H%M%S')}-{sid[:6]}"
+    out.mkdir(parents=True)
+    for i, data in enumerate(raw):
+        (out / f"{i:03d}.jpg").write_bytes(data)
+    (out / "session.json").write_text(json.dumps({"actions": actions, "times": stamps,
+                                                  "decision": result["decision"], "reasons": result["reasons"]}))
+    log.info("saved %s", out)
 
 
 def stream_reasons(times):

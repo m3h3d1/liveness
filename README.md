@@ -87,7 +87,7 @@ Downloaded by `setup` (pinned URLs, SHA-256 checked). Not stored in this repo.
 ```
 
 Other commands: `serve` (foreground), `trace DIR` (per-frame values for a
-folder of JPEGs), `convert`, `clean`.
+folder of JPEGs), `eval DIR` (see below), `convert`, `clean`.
 
 To listen on another address, set `HOST` and `PORT` in the environment or in a
 `.env` file next to `liveness.sh`:
@@ -98,10 +98,33 @@ PORT=8090
 ```
 
 Logs go to `~/Library/Logs/liveness-v2.log`. Only measurements are logged; no
-images are written to disk.
+images are written to disk unless `SAVE_DIR` is set (see below).
 
 The camera needs HTTPS (or `localhost`), so put a reverse proxy with TLS in
 front of it when serving to other devices.
+
+## Measuring accuracy
+
+Record labeled sessions, then re-run the checks on them. Saved frames are face
+data: keep `data/` private (it is in `.gitignore`) and delete it when done.
+
+```sh
+./liveness.sh stop
+SAVE_DIR=data/real ./liveness.sh start     # real faces
+# restart with data/print, data/replay, ... for each attack type
+./liveness.sh eval data
+```
+
+`eval` prints each session's decision and reasons, then per label:
+
+- `real`: **BPCER**, real people not passed (aim below 5-10%)
+- every other label: **APCER**, attacks passed (aim for 0)
+- passive score min/median/max, to place the 0.3 and 0.7 thresholds
+- time per check (p50, p95)
+
+After changing a rule, run `eval` again on the same data; no new recording is
+needed. Record at least 30 sessions per label: if none of 30 attacks pass, the
+true pass rate is very likely under 10% (under 3% for 100).
 
 ## Rules
 

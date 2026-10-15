@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import server
+from tools import eval as replay
 
 CLIP = Path(__file__).resolve().parent / "clips" / "8627673"   # turns right, then left
 
@@ -122,6 +123,14 @@ def test_page_health_and_model(client):
     assert client.get("/health").json() == {"status": "ok"}
     assert client.get("/").status_code == 200
     assert len(client.get("/models/face_landmarker.task").content) == 3758596
+
+
+def test_saved_session_replays_same_result(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "SAVE_DIR", str(tmp_path / "real"))
+    body = upload(client, start(client, monkeypatch, ["turn_right", "turn_left"])).json()
+    [(label, _, result)] = replay.run(tmp_path)
+    assert label == "real" and result["decision"] == body["decision"] == "PASS"
+    assert result["scores"] == body["scores"]
 
 
 def test_details_explain_result(client, monkeypatch):
