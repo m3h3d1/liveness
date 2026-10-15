@@ -32,12 +32,13 @@ def start(client, monkeypatch, actions):
     return r.json()["id"]
 
 
-def upload(client, sid, n=25, replace=None):
+def upload(client, sid, n=25, replace=None, save=None):
     files = [("frames", (p.name, p.read_bytes(), "image/jpeg")) for p in sorted(CLIP.glob("*.jpg"))[:n]]
     if replace:
         files[0] = ("frames", ("big.jpg", replace, "image/jpeg"))
     times = json.dumps([i * 100 for i in range(len(files))])
-    return client.post(f"/api/session/{sid}/frames", files=files, data={"times": times})
+    data = {"times": times} | ({"save": save} if save else {})
+    return client.post(f"/api/session/{sid}/frames", files=files, data=data)
 
 
 def test_challenge_done(client, monkeypatch):
@@ -120,17 +121,31 @@ def test_rate_limit(client):
 
 
 def test_page_health_and_model(client):
-    assert client.get("/health").json() == {"status": "ok"}
+    assert client.get("/health").json() == {"status": "ok", "save": False}
     assert client.get("/").status_code == 200
     assert len(client.get("/models/face_landmarker.task").content) == 3758596
 
 
 def test_saved_session_replays_same_result(client, monkeypatch, tmp_path):
-    monkeypatch.setattr(server, "SAVE_DIR", str(tmp_path / "real"))
-    body = upload(client, start(client, monkeypatch, ["turn_right", "turn_left"])).json()
+    monkeypatch.setattr(server, "SAVE_DIR", str(tmp_path))
+    assert client.get("/health").json()["save"] is True
+    body = upload(client, start(client, monkeypatch, ["turn_right", "turn_left"]), save="print").json()
+    assert body["saved"] is True
     [(label, _, result)] = replay.run(tmp_path)
-    assert label == "real" and result["decision"] == body["decision"] == "PASS"
+    assert label == "print" and result["decision"] == body["decision"] == "PASS"
     assert result["scores"] == body["scores"]
+
+
+def test_saves_only_with_consent(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "SAVE_DIR", str(tmp_path))
+    assert upload(client, start(client, monkeypatch, ["turn_right", "turn_left"])).json()["saved"] is False
+    assert not any(tmp_path.iterdir())
+
+
+def test_unknown_save_label(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "SAVE_DIR", str(tmp_path))
+    assert upload(client, start(client, monkeypatch, ["blink", "turn_left"]), save="../x").status_code == 400
+    assert not any(tmp_path.iterdir())
 
 
 def test_details_explain_result(client, monkeypatch):

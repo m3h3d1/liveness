@@ -47,13 +47,16 @@
   .chosen { margin-top: 10px; text-align: center; }
   .chosen img { width: 60%; border-radius: 50%; }
   .chosen a { display: block; margin-top: 8px; color: var(--accent); font-weight: 600; }
+  .test { margin-top: 12px; padding: 10px 12px; border: 1px dashed var(--warn); border-radius: 8px; font-size: .9rem; }
+  .test label { display: block; margin-top: 6px; }
+  .test select { width: 100%; margin-top: 4px; padding: 6px; font: inherit; }
 </style>
 </head>
 <body>
 <main>
   <h1>Liveness Check</h1>
   <p class="sub">Keep your face in the oval and follow the prompts. Each step waits for you.
-    Frames are checked on the server and not saved. If the check passes, you can pick one of
+    <span id="saveNote">Frames are checked on the server and not saved.</span> If the check passes, you can pick one of
     3 photos from it as a profile picture to download; the others are discarded.</p>
   <div class="card">
     <div class="view">
@@ -63,6 +66,18 @@
       <div class="prompt"><b id="prompt">Press Start and allow the camera</b><small id="hint"></small></div>
     </div>
     <div class="bar"><span id="progress"></span></div>
+    <div class="test" id="test" hidden>
+      <b>Test mode</b>
+      <label>What are you showing the camera?
+        <select id="label">
+          <option value="real">My real face</option>
+          <option value="print">A printed photo</option>
+          <option value="replay">A photo or video on a screen</option>
+          <option value="other">Something else</option>
+        </select></label>
+      <label><input type="checkbox" id="consent"> I agree to save the camera frames from this check on the
+        server, to test accuracy. They stay private and are deleted after testing.</label>
+    </div>
     <button id="start">Start</button>
     <div id="result"></div>
   </div>
@@ -95,6 +110,12 @@ const REASONS = {
 const $ = id => document.getElementById(id);
 const video = $("video"), oval = $("oval"), stepEl = $("step"), promptEl = $("prompt"), hint = $("hint");
 const progress = $("progress"), startBtn = $("start"), result = $("result");
+const testBox = $("test"), labelSel = $("label"), consent = $("consent");
+fetch("/health").then(r => r.json()).then(h => {
+  if (!h.save) return;
+  testBox.hidden = false;
+  $("saveNote").textContent = "Test mode: frames are saved only if you agree below.";
+}).catch(() => {});
 let stream = null, landmarker = null, lastTs = -1;
 
 async function setup() {
@@ -213,7 +234,7 @@ function show(d, local, sid) {
       Face in ${x.face_frames ?? "–"}/${x.frames ?? "–"} frames · face size ${x.face_size ?? "–"} (needs 0.2) ·
       brightness ${x.brightness ?? "–"} · sharpness ${x.sharpness ?? "–"}<br>
       Passive score ${s.passive ?? "–"} (pass ≥ 0.7) on ${x.passive_frames ?? 0} frames · ${d.ms} ms on server
-    </details>`;
+    </details>` + (d.saved ? `<p class="muted">Saved for testing as "${labelSel.selectedOptions[0].text}".</p>` : "");
   if (d.photos && d.photos.length) choosePhoto(sid, d.photos);
 }
 
@@ -267,6 +288,7 @@ startBtn.addEventListener("click", async () => {
     const body = new FormData();
     shots.forEach((s, i) => body.append("frames", s.blob, `${i}.jpg`));
     body.append("times", JSON.stringify(shots.map(s => Math.round(s.t))));
+    if (!testBox.hidden && consent.checked) body.append("save", labelSel.value);
     const sid = d.id;
     r = await fetch(`/api/session/${sid}/frames`, { method: "POST", body });
     d = await r.json();

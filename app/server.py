@@ -1,6 +1,6 @@
 """HTTP API: session with a random challenge, frame upload, decision, profile photo choice.
 
-No images are written to disk unless SAVE_DIR is set (for testing). After a PASS, up to 3 photo candidates stay in memory
+No images are written to disk unless SAVE_DIR is set and the user agrees (testing). After a PASS, up to 3 photo candidates stay in memory
 for PHOTO_TTL so the user can pick one; the rest are dropped.
 """
 import asyncio
@@ -37,7 +37,8 @@ MIN_FACE = 0.2                   # face size, fraction of the frame
 BRIGHTNESS = (40, 220)
 MIN_SHARPNESS = 15.0
 STATIC = Path(__file__).resolve().parent.parent / "static"
-SAVE_DIR = os.environ.get("SAVE_DIR")    # save each session's frames for tools/eval.py
+SAVE_DIR = os.environ.get("SAVE_DIR")    # test mode: save consented sessions for tools/eval.py
+LABELS = ("real", "print", "replay", "other")
 
 log = logging.getLogger("uvicorn.error")
 sessions = {}
@@ -91,7 +92,7 @@ def landmarker_model():
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "save": bool(SAVE_DIR)}
 
 
 @app.post("/api/session")
@@ -131,6 +132,9 @@ async def submit(sid: str, request: Request):
         stamps = json.loads(form.get("times") or "")
     except ValueError:
         raise HTTPException(400, "times must be a JSON list of capture times in ms")
+    label = form.get("save")             # sent only when the user agreed to saving
+    if label is not None and label not in LABELS:
+        raise HTTPException(400, f"save must be one of {', '.join(LABELS)}")
     if not MIN_FRAMES <= len(files) <= MAX_FRAMES or len(stamps) != len(files):
         raise HTTPException(400, f"send {MIN_FRAMES}-{MAX_FRAMES} frames with one capture time each")
 
@@ -151,8 +155,9 @@ async def submit(sid: str, request: Request):
     if picked:
         candidates[sid] = {"created": time.monotonic(), "images": picked}
     result["photos"] = [photos.preview(img) for img in picked]
-    if SAVE_DIR:
-        save(sid, session["actions"], raw, stamps, result)
+    result["saved"] = bool(SAVE_DIR and label)
+    if result["saved"]:
+        save(Path(SAVE_DIR) / label, sid, session["actions"], raw, stamps, result)
     log.info("liveness %s… asked=%s %s %s passive=%s %d ms photos=%d %s", sid[:6], ",".join(session["actions"]),
              result["decision"], ",".join(result["reasons"]) or "-", result["scores"]["passive"], result["ms"],
              len(picked), result["details"])
@@ -188,8 +193,8 @@ def to_seconds(stamps):
     return [(float(t) - float(stamps[0])) / 1000 for t in stamps]
 
 
-def save(sid, actions, raw, stamps, result):
-    out = Path(SAVE_DIR) / f"{time.strftime('%Y%m%d-%H%M%S')}-{sid[:6]}"
+def save(folder, sid, actions, raw, stamps, result):
+    out = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{sid[:6]}"
     out.mkdir(parents=True)
     for i, data in enumerate(raw):
         (out / f"{i:03d}.jpg").write_bytes(data)
