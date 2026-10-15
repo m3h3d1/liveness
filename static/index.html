@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Liveness Check</title>
+<style>
+  :root { --bg: #f6f7f9; --card: #fff; --text: #1d2129; --muted: #667085; --line: #e3e6ea;
+          --accent: #2f6fed; --pass: #1a7f4b; --fail: #c4372d; --warn: #a15c00; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111317; --card: #1a1d23; --text: #e8eaed; --muted: #9aa0a6; --line: #2b2f36;
+            --accent: #6b9bff; --pass: #4cc38a; --fail: #ff6b5f; --warn: #f0a83a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; }
+  main { max-width: 520px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .view { position: relative; aspect-ratio: 3 / 4; background: #0004; border-radius: 10px; overflow: hidden; }
+  video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+  .oval { position: absolute; inset: 12% 18%; border: 3px dashed #fff8; border-radius: 50%; pointer-events: none;
+          transition: border-color .2s; }
+  .oval.ok { border-color: #4cc38a; border-style: solid; }
+  .top { position: absolute; top: 0; left: 0; right: 0; padding: 10px 14px; color: #fff; font-size: .9rem;
+         background: linear-gradient(#000a, transparent); }
+  .prompt { position: absolute; left: 0; right: 0; bottom: 0; padding: 16px 14px; text-align: center; color: #fff;
+            background: linear-gradient(transparent, #000c); }
+  .prompt b { display: block; font-size: 1.35rem; }
+  .prompt small { display: block; min-height: 1.4em; opacity: .9; }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 12px; }
+  .bar span { display: block; height: 100%; width: 0; background: var(--accent); }
+  button { width: 100%; margin-top: 12px; padding: 12px; border-radius: 8px; border: 0; font: inherit;
+           font-weight: 600; background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  #result { margin-top: 16px; }
+  .decision { font-size: 1.4rem; font-weight: 700; }
+  .PASS { color: var(--pass); } .FAIL { color: var(--fail); } .UNCERTAIN { color: var(--warn); }
+  ul { margin: 6px 0 0; padding-left: 20px; }
+  .muted { color: var(--muted); font-size: .85rem; }
+  details { margin-top: 8px; font-size: .85rem; color: var(--muted); }
+  .photos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+  .photos img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; cursor: pointer;
+                border: 3px solid transparent; }
+  .photos img.picked { border-color: var(--accent); }
+  .chosen { margin-top: 10px; text-align: center; }
+  .chosen img { width: 60%; border-radius: 50%; }
+  .chosen a { display: block; margin-top: 8px; color: var(--accent); font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Liveness Check</h1>
+  <p class="sub">Keep your face in the oval and follow the prompts. Each step waits for you.
+    Frames are checked on the server and not saved. If the check passes, you can pick one of
+    3 photos from it as a profile picture to download; the others are discarded.</p>
+  <div class="card">
+    <div class="view">
+      <video id="video" autoplay playsinline muted></video>
+      <div class="oval" id="oval"></div>
+      <div class="top" id="step"></div>
+      <div class="prompt"><b id="prompt">Press Start and allow the camera</b><small id="hint"></small></div>
+    </div>
+    <div class="bar"><span id="progress"></span></div>
+    <button id="start">Start</button>
+    <div id="result"></div>
+  </div>
+</main>
+<script type="module">
+import { FilesetResolver, FaceLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.0/vision_bundle.mjs";
+
+const WASM = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.0/wasm";
+const FPS = 15, LOOK_MS = 1500, STEP_MS = 6000, DONE_MS = 600, MAX_SIDE = 640;
+// Slightly stricter than the server, so a step shown as done also passes there.
+const TURN = 0.35, BACK = 0.25, BACK_MS = 2000, BLINK_RISE = 0.22, BLINK_OPEN = 0.1;
+const STEPS = {
+  turn_left: { text: "← Turn your head to your left", sign: 1 },
+  turn_right: { text: "Turn your head to your right →", sign: -1 },
+  blink: { text: "Blink" },
+};
+const REASONS = {
+  CHALLENGE_MISSING: "A requested action was not seen.",
+  CHALLENGE_ORDER: "The actions were done in the wrong order.",
+  TOO_SLOW: "The actions took too long.",
+  NO_FACE: "Your face left the frame.",
+  MULTIPLE_FACES: "More than one face was seen.",
+  FACE_CHANGED: "The face jumped or changed during the check.",
+  LOW_QUALITY: "The image was too dark, blurry or far away.",
+  PASSIVE_LOW: "The face looks like a photo or a screen.",
+  PASSIVE_BORDERLINE: "The anti-spoof score was borderline.",
+  BAD_FRAMES: "The camera frames arrived unevenly.",
+  EXPIRED: "The session expired. Please try again.",
+};
+const $ = id => document.getElementById(id);
+const video = $("video"), oval = $("oval"), stepEl = $("step"), promptEl = $("prompt"), hint = $("hint");
+const progress = $("progress"), startBtn = $("start"), result = $("result");
+let stream = null, landmarker = null, lastTs = -1;
+
+async function setup() {
+  if (!stream) {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+    video.srcObject = stream;
+    await new Promise(r => (video.readyState >= 2 ? r() : (video.onloadeddata = r)));
+  }
+  if (!landmarker) {
+    promptEl.textContent = "Loading face guide…";
+    const files = await FilesetResolver.forVisionTasks(WASM);
+    const opts = delegate => ({
+      baseOptions: { modelAssetPath: "/models/face_landmarker.task", delegate },
+      runningMode: "VIDEO", numFaces: 1, outputFaceBlendshapes: true });
+    try { landmarker = await FaceLandmarker.createFromOptions(files, opts("GPU")); }
+    catch { landmarker = await FaceLandmarker.createFromOptions(files, opts("CPU")); }
+  }
+}
+
+function measure() {
+  const ts = performance.now();
+  if (ts <= lastTs || video.readyState < 2) return null;
+  lastTs = ts;
+  const r = landmarker.detectForVideo(video, ts);
+  const ok = r.faceLandmarks.length > 0;
+  oval.classList.toggle("ok", ok);
+  if (!ok) return null;
+  const p = r.faceLandmarks[0];
+  // Nose tip vs. middle of the face sides, in face widths. Positive = person turned to their left.
+  const offset = (p[1].x - (p[234].x + p[454].x) / 2) / Math.abs(p[454].x - p[234].x);
+  const score = n => r.faceBlendshapes[0].categories.find(c => c.categoryName === n).score;
+  return { offset, blink: (score("eyeBlinkLeft") + score("eyeBlinkRight")) / 2 };
+}
+
+function recorder() {
+  // Unmirrored frames; the mirror is only CSS on the preview.
+  const k = Math.min(1, MAX_SIDE / Math.max(video.videoWidth, video.videoHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(video.videoWidth * k);
+  canvas.height = Math.round(video.videoHeight * k);
+  const ctx = canvas.getContext("2d"), shots = [];
+  const timer = setInterval(() => {
+    const t = performance.now();
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    shots.push(new Promise(r => canvas.toBlob(b => r({ blob: b, t }), "image/jpeg", 0.8)));
+  }, 1000 / FPS);
+  return async () => { clearInterval(timer); return (await Promise.all(shots)).filter(s => s.blob); };
+}
+
+// Runs until onSample returns true (resolves true) or ms passes (resolves false).
+function watch(ms, onSample) {
+  return new Promise(resolve => {
+    const t0 = performance.now();
+    const tick = () => {
+      const used = performance.now() - t0;
+      progress.style.width = Math.min(100, used / ms * 100) + "%";
+      if (used >= ms) return resolve(false);
+      const m = measure();
+      if (m && onSample(m)) return resolve(true);
+      requestAnimationFrame(tick);
+    };
+    tick();
+  });
+}
+
+const median = xs => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+const pause = ms => watch(ms, () => false);
+
+async function baseline() {
+  stepEl.textContent = "Get ready";
+  promptEl.textContent = "Look straight at the camera";
+  hint.textContent = "";
+  const samples = [];
+  await watch(LOOK_MS, m => { samples.push(m); return false; });
+  if (samples.length < 5) throw new Error("No face found. Face the camera in good light and try again.");
+  return { offset: median(samples.map(s => s.offset)), blink: median(samples.map(s => s.blink)) };
+}
+
+async function runStep(action, base) {
+  const s = STEPS[action];
+  promptEl.textContent = s.text;
+  hint.textContent = "";
+  let closed = false;
+  const done = await watch(STEP_MS, m => {
+    if (action === "blink") {
+      const rise = m.blink - base.blink;
+      if (rise >= BLINK_RISE) closed = true;
+      return closed && rise < BLINK_OPEN;
+    }
+    const d = (m.offset - base.offset) * s.sign;
+    hint.textContent = d <= -TURN ? "Other way" : d >= TURN / 2 ? "A little more" : "";
+    return d >= TURN;
+  });
+  hint.textContent = "";
+  if (done && action !== "blink") {
+    promptEl.textContent = "✓ Good. Now look back at the camera";
+    await watch(BACK_MS, m => Math.abs(m.offset - base.offset) <= BACK);
+  } else {
+    promptEl.textContent = done ? "✓ Done" : "Time's up for this step";
+    await pause(DONE_MS);
+  }
+  return done;
+}
+
+function show(d, local, sid) {
+  const reasons = (d.reasons || []).map(r => `<li>${REASONS[r] || r}</li>`).join("");
+  const label = { PASS: "Live person confirmed", FAIL: "Check failed", UNCERTAIN: "Needs review" }[d.decision];
+  const x = d.details || {}, s = d.scores || {};
+  result.innerHTML = `<div class="decision ${d.decision}">${label}</div>` +
+    (reasons ? `<ul>${reasons}</ul>` : "") +
+    `<details><summary>What was measured</summary>
+      Asked: ${(d.actions || []).join(", ")} · guide saw: ${local.join(", ") || "none"} · server saw: ${(x.seen || []).join(", ") || "none"}<br>
+      Turn left ${x.turn_left_deg ?? "–"}° · turn right ${x.turn_right_deg ?? "–"}° (needs 20°) ·
+      blink strength ${x.blink_rise ?? "–"} (needs 0.2)<br>
+      Face in ${x.face_frames ?? "–"}/${x.frames ?? "–"} frames · face size ${x.face_size ?? "–"} (needs 0.2) ·
+      brightness ${x.brightness ?? "–"} · sharpness ${x.sharpness ?? "–"}<br>
+      Passive score ${s.passive ?? "–"} (pass ≥ 0.7) on ${x.passive_frames ?? 0} frames · ${d.ms} ms on server
+    </details>`;
+  if (d.photos && d.photos.length) choosePhoto(sid, d.photos);
+}
+
+function choosePhoto(sid, previews) {
+  const box = document.createElement("div");
+  box.innerHTML = `<p><b>Pick a profile photo</b><br><span class="muted">Available for 5 minutes.</span></p>
+    <div class="photos">${previews.map((p, i) => `<img src="${p}" data-i="${i}" alt="Photo ${i + 1}">`).join("")}</div>
+    <button id="usePhoto" disabled>Use this photo</button>`;
+  result.append(box);
+  let choice = null;
+  const use = box.querySelector("#usePhoto");
+  box.querySelectorAll(".photos img").forEach(img => img.addEventListener("click", () => {
+    box.querySelectorAll(".photos img").forEach(o => o.classList.toggle("picked", o === img));
+    choice = Number(img.dataset.i);
+    use.disabled = false;
+  }));
+  use.addEventListener("click", async () => {
+    use.disabled = true;
+    try {
+      const r = await fetch(`/api/session/${sid}/photo`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ choice }) });
+      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+      const url = URL.createObjectURL(await r.blob());
+      box.innerHTML = `<div class="chosen"><img src="${url}" alt="Profile photo">
+        <a href="${url}" download="profile.jpg">Download profile photo</a></div>`;
+    } catch (e) {
+      box.innerHTML = `<p class="muted">Could not get the photo: ${e.message}</p>`;
+    }
+  });
+}
+
+startBtn.addEventListener("click", async () => {
+  startBtn.disabled = true;
+  result.textContent = "";
+  try {
+    await setup();
+    let r = await fetch("/api/session", { method: "POST" });
+    let d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    const stop = recorder();
+    const base = await baseline();
+    const local = [];
+    for (const [i, a] of d.actions.entries()) {
+      stepEl.textContent = `Step ${i + 1} of ${d.actions.length}`;
+      if (await runStep(a, base)) local.push(a);
+    }
+    const shots = await stop();
+    stepEl.textContent = "";
+    promptEl.textContent = "Checking…";
+    progress.style.width = "100%";
+    const body = new FormData();
+    shots.forEach((s, i) => body.append("frames", s.blob, `${i}.jpg`));
+    body.append("times", JSON.stringify(shots.map(s => Math.round(s.t))));
+    const sid = d.id;
+    r = await fetch(`/api/session/${sid}/frames`, { method: "POST", body });
+    d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    promptEl.textContent = "Finished";
+    show(d, local, sid);
+  } catch (e) {
+    stepEl.textContent = "";
+    promptEl.textContent = "Something went wrong";
+    result.textContent = e.message;
+  } finally {
+    startBtn.disabled = false;
+    startBtn.textContent = "Try again";
+  }
+});
+</script>
+</body>
+</html>
